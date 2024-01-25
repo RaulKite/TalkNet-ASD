@@ -15,52 +15,41 @@ img_mean = np.array([104., 117., 123.])[:, np.newaxis, np.newaxis].astype('float
 
 
 class S3FD():
-
-    def __init__(self, device='cuda'):
-
-        tstamp = time.time()
+    def __init__(self, device):
         self.device = device
-
-        # print('[S3FD] loading with', self.device)
         self.net = S3FDNet(device=self.device).to(self.device)
         PATH = os.path.join(os.getcwd(), PATH_WEIGHT)
         state_dict = torch.load(PATH, map_location=self.device)
         self.net.load_state_dict(state_dict)
         self.net.eval()
-        # print('[S3FD] finished loading (%.4f sec)' % (time.time() - tstamp))
     
     def detect_faces(self, image, conf_th=0.8, scales=[1]):
-
-        w, h = image.shape[1], image.shape[0]
-
-        bboxes = np.empty(shape=(0, 5))
-
+        _, h, w, _ = image.shape
+        image = torch.from_numpy(image)
+        s = scales[0] 
+        scaled_img = np.zeros((len(image), int(h*s), int(w*s), 3))
+        for i, frame in enumerate(image):
+            scaled_img[i] = cv2.resize(frame.numpy(), dsize=(0, 0), fx=s, fy=s, interpolation=cv2.INTER_LINEAR)
+        scaled_img = torch.from_numpy(scaled_img)
+        scaled_img = torch.permute(scaled_img, (0, 3, 1, 2)).float()
+        all_bboxes = list()
         with torch.no_grad():
-            for s in scales:
-                scaled_img = cv2.resize(image, dsize=(0, 0), fx=s, fy=s, interpolation=cv2.INTER_LINEAR)
-
-                scaled_img = np.swapaxes(scaled_img, 1, 2)
-                scaled_img = np.swapaxes(scaled_img, 1, 0)
-                scaled_img = scaled_img[[2, 1, 0], :, :]
-                scaled_img = scaled_img.astype('float32')
-                scaled_img -= img_mean
-                scaled_img = scaled_img[[2, 1, 0], :, :]
-                x = torch.from_numpy(scaled_img).unsqueeze(0).to(self.device)
-                y = self.net(x)
-
+            scaled_img = scaled_img - img_mean[None, ...]
+            scaled_img = scaled_img[:, [2, 1, 0], :]
+            y_all = self.net(scaled_img.to(self.device))
+            for y in y_all:
+                bboxes = np.empty(shape=(0, 5))
                 detections = y.data
                 scale = torch.Tensor([w, h, w, h])
-
-                for i in range(detections.size(1)):
+                for i in range(detections.size(0)):
                     j = 0
-                    while detections[0, i, j, 0] > conf_th:
-                        score = detections[0, i, j, 0]
-                        pt = (detections[0, i, j, 1:] * scale).cpu().numpy()
+                    while detections[i, j, 0] > conf_th:
+                        score = detections[i, j, 0]
+                        pt = (detections[i, j, 1:] * scale).cpu().numpy()
                         bbox = (pt[0], pt[1], pt[2], pt[3], score)
                         bboxes = np.vstack((bboxes, bbox))
                         j += 1
-
-            keep = nms_(bboxes, 0.1)
-            bboxes = bboxes[keep]
-
-        return bboxes
+                keep = nms_(bboxes, 0.1)
+                bboxes = bboxes[keep]
+                all_bboxes.append(bboxes)
+        return all_bboxes
