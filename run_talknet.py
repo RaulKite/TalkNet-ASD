@@ -1,5 +1,6 @@
 import os, argparse, glob, subprocess, warnings, pickle, math
 import copy
+from time import time
 
 import python_speech_features
 import cv2
@@ -9,6 +10,7 @@ from scipy import signal
 from scipy.io import wavfile
 from scipy.interpolate import interp1d
 import torchvision
+from facenet_pytorch import InceptionResnetV1
 from scenedetect.frame_timecode import  FrameTimecode
 
 from model.faceDetector.s3fd import S3FD
@@ -25,7 +27,7 @@ parser.add_argument('--videoFolder',           type=str, default="demo",  help='
 parser.add_argument('--pretrainModel',         type=str, default="pretrain_TalkSet.model",   help='Path for the pretrained TalkNet model')
 
 parser.add_argument('--nDataLoaderThread',     type=int,   default=10,   help='Number of workers')
-parser.add_argument('--facedetScale',          type=float, default=0.25, help='Scale factor for face detection, the frames will be scale to 0.25 orig')
+parser.add_argument('--facedetScale',          type=float, default=1, help='Scale factor for face detection, the frames will be scale to 0.25 orig')
 parser.add_argument('--minTrack',              type=int,   default=10,   help='Number of min frames for each shot')
 parser.add_argument('--numFailedDet',          type=int,   default=10,   help='Number of missed detections allowed before tracking is stopped')
 parser.add_argument('--minFaceSize',           type=int,   default=1,    help='Minimum face size in pixels')
@@ -81,7 +83,7 @@ def read_video(flist, shot):
 		all_frames[fidx] = frame
 	return all_frames
 
-def inference_video(args, all_frames, DET, shot ):
+def inference_video(args, all_frames, DET, shot):
 	bs = 64
 	start_frame = shot[0].frame_num
 	dets = []
@@ -95,7 +97,12 @@ def inference_video(args, all_frames, DET, shot ):
 			frame_num = bs * batch_id + batch_frame + start_frame
 			dets.append([])
 			for bbox in bboxes:
-				dets[-1].append({'frame':frame_num, 'bbox':(bbox[:-1]).tolist(), 'conf':bbox[-1]}) # dets has the frames info, bbox info, conf info
+				dets[-1].append(
+					{
+						'frame':frame_num, 
+						'bbox':(bbox[:-1]).tolist(), 
+						'conf':bbox[-1]}
+					) 
 	return dets
 
 def bb_intersection_over_union(boxA, boxB):
@@ -183,6 +190,17 @@ def extract_MFCC(file, outPath):
 	featuresPath = os.path.join(outPath, file.split('/')[-1].replace('.wav', '.npy'))
 	np.save(featuresPath, mfcc)
 
+def calculate_face_embeddings(facenet, faces):
+	inp_faces = np.stack([cv2.resize(elem, (160,160)) for elem in faces])
+	# faces = cv2.resize(faces, (160, 160))
+	inp_faces = np.einsum('bhwc->bchw', inp_faces)
+	inp_faces = (inp_faces - 127.5)/128
+	inp_faces = torch.from_numpy(inp_faces).float()
+	with torch.no_grad():
+		embeddings = facenet(inp_faces.cuda())
+	embeddings = embeddings.detach().cpu().numpy()
+	return embeddings
+
 def evaluate_network(s, media_list):
 	allScores = []
 	durationSet = {1,2,3,4,5,6} # Use this line can get more reliable result
@@ -254,6 +272,7 @@ def main():
 	os.makedirs(args.pyframesPath, exist_ok = True) # Save all the video frames
 	os.makedirs(args.pyworkPath, exist_ok = True) # Save the results in this process by the pckl method
 
+	t = time()
 	scenes = read_scenes(args)
 	flist = glob.glob(os.path.join(args.pyframesPath, '*.jpg'))
 	flist.sort()
@@ -262,9 +281,12 @@ def main():
 	faces = list()
 	all_scores = list()
 	DET = S3FD(device=device)
+	facenet = InceptionResnetV1(pretrained='vggface2').eval().cuda()
 	s = talkNet(device=device)
 	s.loadParameters(args.pretrainModel)
 	s.eval()
+	print("Preprocessing time in s: ", time() - t)
+	t = time()
 	for shot in scenes:
 		all_frames = read_video(flist, shot)
 		shot_faces = inference_video(args, all_frames, DET, shot)
@@ -275,14 +297,16 @@ def main():
 				media_list = []
 				for track in tracks:
 					save_dict, media_dict = crop_video(args, track, all_frames, original_audio, shot)
+					embeddings = calculate_face_embeddings(facenet, media_dict["video"])
+					save_dict.update({"embeddings": embeddings})
 					vidTracks.append(save_dict)
 					media_list.append(media_dict)
 				scores = evaluate_network(s, media_list)
 				all_scores.extend(scores)
-			
-	savePath = os.path.join(args.pyworkPath,'faces.pckl')
-	with open(savePath, 'wb') as fil:
-		pickle.dump(faces, fil)
+	print("Inference time in s: ", time() - t)
+	# savePath = os.path.join(args.pyworkPath,'faces.pckl')
+	# with open(savePath, 'wb') as fil:
+	# 	pickle.dump(faces, fil)
 			
 	savePath = os.path.join(args.pyworkPath, 'tracks.pckl')
 	with open(savePath, 'wb') as fil:
@@ -294,7 +318,7 @@ def main():
 	with open(savePath, 'wb') as fil:
 		pickle.dump(all_scores, fil)
 
-	visualization(vidTracks, all_scores, args)	
+	# visualization(vidTracks, all_scores, args)	
 
 if __name__ == '__main__':
     main()

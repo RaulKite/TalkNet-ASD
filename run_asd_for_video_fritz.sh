@@ -7,13 +7,17 @@
 
 unset SLURM_EXPORT_ENV
 
+export LANG='en_US.UTF-8'
+export LC_ALL='en_US.UTF-8'
+
+
 RUN_FOLDER=$(pwd)
 
 module load python
 cd /tmp/$SLURM_JOB_ID.fritz
 python -m venv venvs/foo
 source venvs/foo/bin/activate
-python -m pip install gdown scikit-learn
+python -m pip install gdown scikit-learn --quiet
 python -m pip install torch numpy scipy python_speech_features opencv-python facenet-pytorch pandas tqdm --quiet
 python -m pip install --upgrade scenedetect[opencv] --quiet
 cd $RUN_FOLDER
@@ -26,12 +30,17 @@ THREADS=10
 CASE_ID=$1
 DEVICE=cpu
 
-VIDEO_PATH=$(cat $ALL_VIDEOS_LIST | grep $CASE_ID)
+echo $CASE_ID
+
+VIDEO_PATH=$(grep "$CASE_ID" "$ALL_VIDEOS_LIST")
+echo $VIDEO_PATHecho $VIDEO_PATH
 SAVE_TO=$DATASET/russian_propaganda_dataset_openpose/test_asd/$CASE_ID
 PATH_TO_SCENES=$ALL_SCENES_FOLDER/$CASE_ID-Scenes.csv
 
 mkdir $TMPDIR/{pyavi,pyframes,pywork}
-mkdir -p $SAVE_TO
+if [ ! -d "$SAVE_TO" ]; then
+    mkdir $SAVE_TO
+fi
 
 $ffmpeg -y -i $VIDEO_PATH -qscale:v 2 -threads $THREADS -async 1 -r 25 $TMPDIR/temp_video_25fps.avi -loglevel panic
 $ffmpeg -y -i $VIDEO_PATH -qscale:a 0 -ac 1 -vn -threads $THREADS -ar 16000 $TMPDIR/temp_audio_16khz.wav -loglevel panic
