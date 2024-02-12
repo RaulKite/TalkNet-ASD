@@ -83,16 +83,24 @@ def read_video(flist, shot):
 		all_frames[fidx] = frame
 	return all_frames
 
+def define_scale_coeff(h, w):
+	if h * w < 1e6:
+		return 1
+	s = max(max(h,w)/640, min(h,w)/480)
+	return round(1/s,3)
+
 def inference_video(args, all_frames, DET, shot):
 	bs = 64
 	start_frame = shot[0].frame_num
 	dets = []
+	s = define_scale_coeff(*all_frames[0].shape[:-1])
 	if len(all_frames) % bs == 0:
 		batch_num = len(all_frames) // bs
 	else:
 		batch_num = len(all_frames) // bs + 1
 	for batch_id in range(batch_num):
-		batch_bboxes = DET.detect_faces(all_frames[batch_id*bs:(batch_id+1)*bs], conf_th=0.9, scales=[args.facedetScale])
+		# batch_bboxes = DET.detect_faces(all_frames[batch_id*bs:(batch_id+1)*bs], conf_th=0.9, scales=[args.facedetScale])
+		batch_bboxes = DET.detect_faces(all_frames[batch_id*bs:(batch_id+1)*bs], conf_th=0.9, scales=[s])
 		for batch_frame, bboxes in enumerate(batch_bboxes):
 			frame_num = bs * batch_id + batch_frame + start_frame
 			dets.append([])
@@ -318,7 +326,7 @@ def main():
 	with open(savePath, 'wb') as fil:
 		pickle.dump(all_scores, fil)
 
-	# visualization(vidTracks, all_scores, args)	
+	visualization(vidTracks, all_scores, args)	
 
 if __name__ == '__main__':
     main()

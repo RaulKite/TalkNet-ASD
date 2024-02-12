@@ -1,9 +1,11 @@
 #!/bin/bash -l
 
-#SBATCH --gres=gpu:a40:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --time=08:00:00
 #SBATCH --job-name=talknet_alex_dataset327
 #SBACTH --export=NONE
+#SBATCH -e slurm_stderr/talknet_alex_dataset327-%j.err
+#SBATCH -o slurm_stdout/talknet_alex_dataset327-%j.out
 
 unset SLURM_EXPORT_ENV
 
