@@ -90,7 +90,7 @@ def define_scale_coeff(h, w):
 	return round(1/s,3)
 
 def inference_video(args, all_frames, DET, shot):
-	bs = 64
+	bs = 32
 	start_frame = shot[0].frame_num
 	dets = []
 	s = define_scale_coeff(*all_frames[0].shape[:-1])
@@ -99,7 +99,6 @@ def inference_video(args, all_frames, DET, shot):
 	else:
 		batch_num = len(all_frames) // bs + 1
 	for batch_id in range(batch_num):
-		# batch_bboxes = DET.detect_faces(all_frames[batch_id*bs:(batch_id+1)*bs], conf_th=0.9, scales=[args.facedetScale])
 		batch_bboxes = DET.detect_faces(all_frames[batch_id*bs:(batch_id+1)*bs], conf_th=0.9, scales=[s])
 		for batch_frame, bboxes in enumerate(batch_bboxes):
 			frame_num = bs * batch_id + batch_frame + start_frame
@@ -312,9 +311,6 @@ def main():
 				scores = evaluate_network(s, media_list)
 				all_scores.extend(scores)
 	print("Inference time in s: ", time() - t)
-	# savePath = os.path.join(args.pyworkPath,'faces.pckl')
-	# with open(savePath, 'wb') as fil:
-	# 	pickle.dump(faces, fil)
 			
 	savePath = os.path.join(args.pyworkPath, 'tracks.pckl')
 	with open(savePath, 'wb') as fil:
@@ -326,7 +322,8 @@ def main():
 	with open(savePath, 'wb') as fil:
 		pickle.dump(all_scores, fil)
 
-	visualization(vidTracks, all_scores, args)	
+	if args.visualisation:
+		visualization(vidTracks, all_scores, args)	
 
 if __name__ == '__main__':
     main()
