@@ -85,11 +85,11 @@ def read_video(flist, shot):
 
 def define_scale_coeff(h, w):
 	if h * w < 1e6:
-		return 1
+		return 0.5
 	s = max(max(h,w)/640, min(h,w)/480)
-	return round(1/s,3)
+	return 0.5 * round(1/s, 3)
 
-def inference_video(args, all_frames, DET, shot):
+def inference_video(all_frames, DET, shot):
 	bs = 32
 	start_frame = shot[0].frame_num
 	dets = []
@@ -198,15 +198,18 @@ def extract_MFCC(file, outPath):
 	np.save(featuresPath, mfcc)
 
 def calculate_face_embeddings(facenet, faces):
+	bs = 5000
+	all_embeddings = np.zeros((len(faces), 512))
 	inp_faces = np.stack([cv2.resize(elem, (160,160)) for elem in faces])
-	# faces = cv2.resize(faces, (160, 160))
 	inp_faces = np.einsum('bhwc->bchw', inp_faces)
 	inp_faces = (inp_faces - 127.5)/128
 	inp_faces = torch.from_numpy(inp_faces).float()
-	with torch.no_grad():
-		embeddings = facenet(inp_faces.cuda())
-	embeddings = embeddings.detach().cpu().numpy()
-	return embeddings
+	for i in range(len(faces)//bs + 1):
+		with torch.no_grad():
+			embeddings = facenet(inp_faces[bs*i:bs*(i+1)].to(device))
+			embeddings = embeddings.detach().cpu().numpy()
+		all_embeddings[bs*i:bs*(i+1)] = embeddings
+	return all_embeddings
 
 def evaluate_network(s, media_list):
 	allScores = []
@@ -278,7 +281,6 @@ def main():
 	os.makedirs(args.pyaviPath, exist_ok = True) # The path for the input video, input audio, output video
 	os.makedirs(args.pyframesPath, exist_ok = True) # Save all the video frames
 	os.makedirs(args.pyworkPath, exist_ok = True) # Save the results in this process by the pckl method
-
 	t = time()
 	scenes = read_scenes(args)
 	flist = glob.glob(os.path.join(args.pyframesPath, '*.jpg'))
@@ -288,7 +290,7 @@ def main():
 	faces = list()
 	all_scores = list()
 	DET = S3FD(device=device)
-	facenet = InceptionResnetV1(pretrained='vggface2').eval().cuda()
+	facenet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 	s = talkNet(device=device)
 	s.loadParameters(args.pretrainModel)
 	s.eval()
@@ -296,10 +298,10 @@ def main():
 	t = time()
 	for shot in scenes:
 		all_frames = read_video(flist, shot)
-		shot_faces = inference_video(args, all_frames, DET, shot)
+		shot_faces = inference_video(all_frames, DET, shot)
 		faces.extend(list(shot_faces))
-		if shot[1].frame_num - shot[0].frame_num >= args.minTrack: # Discard the shot frames less than minTrack frames
-			tracks = track_shot(args, copy.deepcopy(shot_faces)) # 'frames' to present this tracks' timestep, 'bbox' presents the location of the faces
+		if shot[1].frame_num - shot[0].frame_num >= args.minTrack:
+			tracks = track_shot(args, copy.deepcopy(shot_faces))
 			if tracks:
 				media_list = []
 				for track in tracks:

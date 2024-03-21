@@ -30,7 +30,6 @@ class S3FD():
         scaled_img = np.zeros((len(image), int(h*s), int(w*s), 3))
         for i, frame in enumerate(image):
             scaled_img[i] = cv2.resize(frame.numpy(), dsize=(int(w*s), int(h*s)), interpolation=cv2.INTER_LINEAR)
-            # scaled_img[i] = cv2.resize(frame.numpy(), dsize=(0,0), fx=s, fy=s, interpolation=cv2.INTER_LINEAR)
         scaled_img = torch.from_numpy(scaled_img)
         scaled_img = torch.permute(scaled_img, (0, 3, 1, 2)).float()
         all_bboxes = list()
