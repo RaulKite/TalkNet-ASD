@@ -11,10 +11,11 @@ from scipy.io import wavfile
 from scipy.interpolate import interp1d
 import torchvision
 from facenet_pytorch import InceptionResnetV1
-from scenedetect.frame_timecode import  FrameTimecode
 
 from model.faceDetector.s3fd import S3FD
 from talkNet import talkNet
+from io_utils import read_audio, read_video
+from scene_utils import read_scenes
 
 warnings.filterwarnings("ignore")
 
@@ -52,36 +53,6 @@ args.videoPath = glob.glob(os.path.join(args.videoFolder, args.videoName + '.*')
 args.savePath = args.videoFolder
 
 FPS = 25
-
-def read_scenes(args):
-	with open(args.pathToScenes, "r") as file:
-		all_lines = file.readlines()
-	all_scenes = list()
-	for line in all_lines[2:]:
-		splitted_line = line.split(',')
-		_, _, start_timecode, _, _, end_timecode, *_ = splitted_line
-		start_frame = FrameTimecode(start_timecode, 25)
-		end_frame = FrameTimecode(end_timecode, 25)
-		all_scenes.append((start_frame, end_frame))
-	return all_scenes
-
-def read_audio(args):
-	audio_fp = args.audioFilePath
-	_, audio = wavfile.read(audio_fp)
-	return audio
-
-def read_video(flist, shot):
-	start_shot, end_shot = shot
-	start_frame = start_shot.frame_num
-	end_frame = end_shot.frame_num
-	frame = cv2.imread(flist[start_frame])
-	all_frames = np.zeros((end_frame - start_frame, *frame.shape), dtype='uint8')
-	all_frames[0] = frame
-	for fidx in range(1, end_frame - start_frame):
-		fname = flist[start_frame + fidx]
-		frame = cv2.imread(fname)
-		all_frames[fidx] = frame
-	return all_frames
 
 def define_scale_coeff(h, w):
 	if h * w < 1e6:
