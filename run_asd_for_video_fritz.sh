@@ -2,7 +2,7 @@
 
 #SBATCH --partition=singlenode
 #SBATCH --time=08:00:00
-#SBATCH --job-name=talknet_fritz
+#SBATCH --output /home/hpc/b105dc/b105dc10/gesture-tokenizer/asd_logs/asd_on_rpd_video_id_%x_job_id_%j_fritz.out
 #SBACTH --export=NONE
 
 unset SLURM_EXPORT_ENV

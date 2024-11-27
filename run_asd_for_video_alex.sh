@@ -1,9 +1,9 @@
 #!/bin/bash -l
 
 #SBATCH --gres=gpu:a40:1
-#SBATCH --time=08:00:00
+#SBATCH --time=24:00:00
 #SBACTH --export=NONE
-#SBATCH --output slurm_output/asd_on_rpd_video_id_%x_job_id_%j.out
+#SBATCH --output /home/atuin/b105dc/data/work/iburenko/gesture-tokenizer-work/logs/asd_on_rpd_video_id_%x_job_id_%j.out
 
 unset SLURM_EXPORT_ENV
 
@@ -11,7 +11,7 @@ export LANG='en_US.UTF-8'
 export LC_ALL='en_US.UTF-8'
 
 function get_full_saveto_path () {
-    VIDEO_PATH=$(grep -- "$CASE_ID" "$ALL_VIDEOS_LIST")
+    VIDEO_PATH=$(grep -- "$CASE_ID" "$ALL_VIDEOS_LIST" | grep -v f244)
     PATH_SUFFIX=$(echo $VIDEO_PATH | cut -d '/' -f 7-9)
     SAVE_TO=$DATASET/russian_propaganda_dataset_openpose/asd_output/$PATH_SUFFIX/$CASE_ID
 }
@@ -42,7 +42,7 @@ fi
 # Create python environment
 RUN_FOLDER=$(pwd)
 module load python
-cd /tmp/$SLURM_JOB_ID.alex
+cd /tmp/$SLURM_JOB_ID.alex # $TMPDIR
 python -m venv venvs/foo
 source venvs/foo/bin/activate
 python -m pip install gdown scikit-learn --quiet
@@ -63,7 +63,7 @@ python run_talknet.py \
     --videoName temp_video_25fps \
     --videoFolder $TMPDIR \
     --audioFilePath $TMPDIR/temp_audio_16khz.wav \
-    --device $DEVICE 
+    --device $DEVICE
 
 # Create output folder
 if [ ! -d "$SAVE_TO" ]; then
