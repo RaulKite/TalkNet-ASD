@@ -23,7 +23,7 @@ See the list of required Python packages <details><summary> here </summary>
 
 ### Scenes
 
-The script requires a list of scenes, which can be produced using ```[pyscenedetect](https://www.scenedetect.com/)```.
+The script requires a list of scenes, which can be produced using [pyscenedetect](https://www.scenedetect.com/).
 Install ```pyscenedetect``` using pip:
 
 > python -m pip install scenedetect
