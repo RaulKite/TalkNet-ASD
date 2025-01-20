@@ -238,7 +238,7 @@ def visualization(tracks, scores, args):
 			cv2.putText(image,'%s'%(txt), (int(face['x']-face['s']), int(face['y']-face['s'])), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,clr,255-clr),5)
 		vOut.write(image)
 	vOut.release()
-	command = ("/home/atuin/b105dc/data/software/ffmpeg/ffmpeg -y -i %s -i %s -threads %d -c:v copy -c:a copy %s -loglevel panic" % \
+	command = ("ffmpeg -y -i %s -i %s -threads %d -c:v copy -c:a copy %s -loglevel panic" % \
 		(os.path.join(args.pyaviPath, 'video_only.avi'), args.audioFilePath, \
 		args.nDataLoaderThread, os.path.join(args.pyaviPath,'video_out.avi'))) 
 	output = subprocess.call(command, shell=True, stdout=None)

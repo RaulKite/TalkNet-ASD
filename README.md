@@ -21,6 +21,16 @@ See the list of required Python packages <details><summary> here </summary>
 
 </details>
 
+
+### Quick Start
+
+To generate masked videos of the speaker at certain second with only one scene:
+
+```
+./process_video.py --input_dir input_videos_folder --output_dir output_videos_folder
+```
+
+
 ### Scenes
 
 The script requires a list of scenes, which can be produced using [pyscenedetect](https://www.scenedetect.com/).

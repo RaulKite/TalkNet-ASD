@@ -11,3 +11,6 @@ torchvision
 ffmpeg
 gdown
 youtube-dl
+facenet-pytorch
+pandas
+scenedetect[opencv]
