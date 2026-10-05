@@ -119,3 +119,7 @@ venv.bak/
 tmp/*
 
 
+
+# pesos de modelos (los del pipeline y los que baja ultralytics en el cwd)
+*.pt
+output/
