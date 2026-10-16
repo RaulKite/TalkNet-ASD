@@ -2,6 +2,7 @@
 
 import os
 import pickle
+import shutil
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -32,29 +33,69 @@ def process_video(video_path: str) -> tuple[str, str]:
     
     return f"{output_dir}/scores.pckl", f"{output_dir}/tracks.pckl"
 
-def analyze_scene_and_scores(csv_path: str, scores_path: str, frame_num: int = 50) -> tuple[bool, float]:
+def analyze_scene_and_scores(csv_path: str, scores_path: str, tracks_path: str, frame_num: int = 50) -> tuple[bool, float]:
     """
     Analyze if video has single scene and get mean scores.
     
     Args:
         csv_path: Path to scenes CSV
         scores_path: Path to scores pickle file
+        tracks_path: Path to tracks pickle file
         
     Returns:
         tuple: (has_single_scene, mean_score)
+
+    Note: tracks come out of TalkNet in arbitrary order, so scores[0] is NOT the
+    speaker. The mean is taken over the best-scoring track that is actually
+    visible at frame_num; see pick_active_track().
     """
     # Check if single scene
     with open(csv_path, 'r') as f:
         has_single_scene = sum(1 for line in f) - 2 == 1
-        
+
     # Get mean scores for frames 45-55
     with open(scores_path, 'rb') as f:
         scores = pickle.load(f)
-    mean_score = np.mean(scores[0][frame_num-5:frame_num+5])
-    
+    with open(tracks_path, 'rb') as f:
+        tracks = pickle.load(f)
+
+    _, mean_score = pick_active_track(scores, tracks, frame_num)
     return has_single_scene, mean_score
 
-def get_bbox_center(tracks_path: str, frame_num: int = 50) -> tuple[float, float]:
+def _track_window(scores: np.ndarray, frames: np.ndarray, frame_num: int) -> np.ndarray:
+    """Scores of a track in a +/-5 frame window around frame_num.
+
+    scores[i] corresponds to frames[i] and the last frame has no score, so the
+    window is clamped to len(scores).
+    """
+    start = int(frames[0])
+    pos = frame_num - start
+    if pos < 0 or pos >= len(scores) + 1:
+        return np.array([])
+    lo = max(0, pos - 5)
+    hi = max(lo, min(len(scores), pos + 5))
+    return scores[lo:hi]
+
+def pick_active_track(scores: list, tracks: list, frame_num: int = 50) -> tuple[int | None, float]:
+    """Index of the track most likely speaking at frame_num, and its mean score.
+
+    Only tracks visible at frame_num are considered: masking a track that is off
+    screen at that instant produces a black clip.
+    """
+    best_idx, best_score = None, None
+    for i, (sc, tr) in enumerate(zip(scores, tracks)):
+        frames = np.asarray(tr['track']['frame'])
+        if not (len(frames) and frames[0] <= frame_num <= frames[-1]):
+            continue
+        win = _track_window(np.asarray(sc), frames, frame_num)
+        if win.size == 0:
+            continue
+        m = float(np.mean(win))
+        if best_score is None or m > best_score:
+            best_idx, best_score = i, m
+    return best_idx, (best_score if best_score is not None else float('-inf'))
+
+def get_bbox_center(tracks_path: str, frame_num: int = 50, track_idx: int = 0) -> tuple[float, float]:
     """
     Get center coordinates of bbox at specified frame.
     
@@ -68,9 +109,9 @@ def get_bbox_center(tracks_path: str, frame_num: int = 50) -> tuple[float, float
     with open(tracks_path, 'rb') as f:
         tracks = pickle.load(f)
     
-    # Get bbox coordinates for frame 50
-    frame_idx = np.where(tracks[0]['track']['frame'] == frame_num)[0][0]
-    bbox = tracks[0]['track']['bbox'][frame_idx]
+    # Get bbox coordinates for the requested frame of the selected track
+    frame_idx = np.where(tracks[track_idx]['track']['frame'] == frame_num)[0][0]
+    bbox = tracks[track_idx]['track']['bbox'][frame_idx]
     center_x = (bbox[0] + bbox[2]) / 2
     center_y = (bbox[1] + bbox[3]) / 2
     
@@ -100,7 +141,15 @@ def create_tracked_person_video(video_path: str, results: list, track_id: int, o
     # Get video properties
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    # Keep the fps as a float. int(29.97) == 29 stamped the masked clip as 29 fps,
+    # so the same 663 frames claimed to last 22.86s instead of 22.12s. Frame
+    # numbering is untouched (raw and masked stay 1:1, checked on every clip), so
+    # hefesto's join by frame is unaffected -- but the duration the file declared
+    # was wrong for anything that trusts it, and the clip no longer matched its
+    # own raw source on the timeline.
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not fps or fps != fps:  # 0.0 or NaN on unreadable streams
+        fps = 25.0
     print(f"Video properties - Width: {width}, Height: {height}, FPS: {fps}")
     
     # Create absolute paths
@@ -138,24 +187,27 @@ def create_tracked_person_video(video_path: str, results: list, track_id: int, o
             frame_results = results[frame_idx]
             boxes = frame_results.boxes.xyxy
             ids = frame_results.boxes.id
-            
-            # Find tracked person and copy their region from original frame
-            for box, id in zip(boxes, ids):
-                if int(id) == track_id:
-                    x1, y1, x2, y2 = map(int, box)
-                    
-                    # Calculate 5% of width and height for expansion
-                    w_expand = int((x2 - x1) * 0.05)
-                    h_expand = int((y2 - y1) * 0.05)
-                    
-                    # Expand box by 5% each side, but stay within frame bounds
-                    x1 = max(0, x1 - w_expand)
-                    y1 = max(0, y1 - h_expand)
-                    x2 = min(width, x2 + w_expand)
-                    y2 = min(height, y2 + h_expand)
-                    
-                    # Copy the person region from original frame to black frame
-                    black_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+            # boxes.id is None on frames where the tracker has no confirmed
+            # track; iterating it raised 'NoneType' is not iterable and killed
+            # the whole clip. Such a frame stays black.
+            if ids is not None:
+                # Find tracked person and copy their region from original frame
+                for box, id in zip(boxes, ids):
+                    if int(id) == track_id:
+                        x1, y1, x2, y2 = map(int, box)
+
+                        # Calculate 5% of width and height for expansion
+                        w_expand = int((x2 - x1) * 0.05)
+                        h_expand = int((y2 - y1) * 0.05)
+
+                        # Expand box by 5% each side, but stay within frame bounds
+                        x1 = max(0, x1 - w_expand)
+                        y1 = max(0, y1 - h_expand)
+                        x2 = min(width, x2 + w_expand)
+                        y2 = min(height, y2 + h_expand)
+
+                        # Copy the person region from original frame to black frame
+                        black_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
         
         # Write frame
         out.write(black_frame)
@@ -219,6 +271,9 @@ def get_track_id_at_point(frame_num: int, x: int, y: int, results: list) -> int 
     # Get all bounding boxes and IDs for this frame
     boxes = frame_results.boxes.xyxy
     track_ids = frame_results.boxes.id
+    # Boxes without ids: the tracker had no confirmed track on this frame.
+    if track_ids is None:
+        return None
 
     # Check each box if it contains the point
     for box, track_id in zip(boxes, track_ids):
@@ -245,17 +300,28 @@ def process_one_video(video_path: str, output_dir: str = "./output", frame_num: 
     print(50*'-')
     csv_path = f"./output/{case_id}/{case_id}.csv"
     
-    has_single_scene, mean_score = analyze_scene_and_scores(csv_path, scores_path, frame_num=50)
+    has_single_scene, mean_score = analyze_scene_and_scores(csv_path, scores_path, tracks_path, frame_num=frame_num)
     print(f"Has single scene: {has_single_scene}")
     print(f"Mean score (frames {frame_num-5}:{frame_num+5}): {mean_score}")
     
     if has_single_scene and mean_score > 0:
-        # Step 3: Get bbox center
-        center_x, center_y = get_bbox_center(tracks_path, frame_num)
+        # Step 3: Get bbox center of the track that is actually speaking
+        with open(scores_path, 'rb') as f:
+            scores = pickle.load(f)
+        with open(tracks_path, 'rb') as f:
+            tracks = pickle.load(f)
+        track_idx, _ = pick_active_track(scores, tracks, frame_num)
+        if track_idx is None:
+            print("Ningun track visible en el frame indicado")
+            return
+        center_x, center_y = get_bbox_center(tracks_path, frame_num, track_idx=track_idx)
+        print(f"Active track: {track_idx}")
         print(f"Center point at frame {frame_num}: ({center_x:.2f}, {center_y:.2f})")
 
         model = YOLO("yolo11n.pt")
-        results = model.track(source=video_path, conf=0.5, iou=0.5, show=True, save=True, save_dir="output", save_txt=True, save_json=True)
+        # show=True calls cv2.imshow, which aborts the whole process on a headless
+        # box (no Qt xcb platform). save=True keeps the annotated output video.
+        results = model.track(source=video_path, conf=0.5, iou=0.5, show=False, save=True, save_dir="output", save_txt=True, save_json=True)
         track_id = get_track_id_at_point(frame_num, center_x, center_y, results)
         output_path = f"./output/{case_id}/{case_id}.mp4"
         
@@ -264,7 +330,10 @@ def process_one_video(video_path: str, output_dir: str = "./output", frame_num: 
 
         # if output video exists, move to output folder
         if os.path.exists(output_path):
-            os.rename(output_path, f"{output_dir}/{os.path.basename(output_path)}")
+            # os.rename raises EXDEV when output_dir is on another filesystem
+            # (e.g. an external disk or /tmp); shutil.move falls back to copy.
+            os.makedirs(output_dir, exist_ok=True)
+            shutil.move(output_path, f"{output_dir}/{os.path.basename(output_path)}")
     else:
         print("Video doesn't meet criteria (single scene with positive mean score)")
   

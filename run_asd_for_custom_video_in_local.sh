@@ -7,16 +7,23 @@ CASE_ID=$(basename $VIDEO_PATH)
 CASE_ID="${CASE_ID%.mp4}"
 echo "**************************************************$CASE_ID**************************************************"
 
-SAVE_TO="./output/$CASE_ID"
-DEVICE=cuda
+# Upstream hard-coded /data/home/raul/miscosas/repos/TalkNet-ASD. Resolve the
+# repo from this script instead.
+REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
+
+# SAVE_TO must be absolute: the script cd's into REPO_DIR later, and a relative
+# path set before that cd resolves against the NEW working directory.
+SAVE_TO="$(pwd -P)/output/$CASE_ID"
+DEVICE="${ASD_DEVICE:-cuda}"
 
 # Create output folder
 if [ ! -d "$SAVE_TO" ]; then
     mkdir -p $SAVE_TO
 fi
 
-# Create temporary directories
-TEMP_DIR="/tmp/talknet_processing"
+# One temp dir per clip: the shared /tmp/talknet_processing made two concurrent
+# runs overwrite each other's frames.
+TEMP_DIR="${TMPDIR:-/tmp}/talknet_processing/$CASE_ID"
 mkdir -p $TEMP_DIR/{pyavi,pyframes,pywork}
 
 # Define paths and parameters
@@ -55,15 +62,20 @@ ffmpeg -y -i $VIDEO_PATH -qscale:v 2 -threads $THREADS -async 1 -r 25 $TEMP_DIR/
 ffmpeg -y -i $VIDEO_PATH -qscale:a 0 -ac 1 -vn -threads $THREADS -ar 16000 $TEMP_DIR/temp_audio_16khz.wav -loglevel panic
 ffmpeg -y -i $TEMP_DIR/temp_video_25fps.avi -qscale:v 2 -threads $THREADS -f image2 $TEMP_DIR/pyframes/%07d.jpg -loglevel panic
 
-# Run TalkNet
-cd /data/home/raul/miscosas/repos/TalkNet-ASD  # Make sure to update this path
+# Run TalkNet. The cd is required: s3fd loads its weights from a cwd-relative
+# path (model/faceDetector/s3fd/sfd_face.pth).
+cd "$REPO_DIR"
+# --visualisation renders an annotated avi POLYMNIA never reads; ASD_VISUALISATION=0
+# skips it on large batches.
+VIS_ARGS=(--visualisation)
+if [ "${ASD_VISUALISATION:-1}" = "0" ]; then VIS_ARGS=(); fi
 python run_talknet.py \
     --pathToScenes $PATH_TO_SCENES \
     --videoName temp_video_25fps \
     --videoFolder $TEMP_DIR \
     --audioFilePath $TEMP_DIR/temp_audio_16khz.wav \
     --device $DEVICE \
-    --visualisation
+    ${VIS_ARGS[@]+"${VIS_ARGS[@]}"}
 
 # Copy results
 cp $TEMP_DIR/pywork/* $SAVE_TO/

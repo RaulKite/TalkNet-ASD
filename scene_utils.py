@@ -9,7 +9,8 @@ def correct_timecode(timecode):
         timecode = H + ":" + M + ":" + S + "." + MS
     return timecode
 
-def split_long_scene(scene, scene_len, fps=25):
+# scenedetect >=0.7 requires a float fps (int raises TypeError in FrameTimecode).
+def split_long_scene(scene, scene_len, fps=25.0):
 	augmented_scenes = 0
 	augmented_scene_list = list()
 	one_minute = FrameTimecode("00:01:00.000", fps)
@@ -35,7 +36,7 @@ def split_all_all_scenes(all_scenes):
 		all_adjusted_scenes.extend(scene_list)
 	return all_adjusted_scenes
 
-def read_scenes(args, fps=25):
+def read_scenes(args, fps=25.0):
 	with open(args.pathToScenes, "r") as file:
 		all_lines = file.readlines()
 	all_scenes = list()
