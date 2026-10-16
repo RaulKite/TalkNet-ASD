@@ -22,6 +22,19 @@ See the list of required Python packages <details><summary> here </summary>
 </details>
 
 
+### Model weights
+
+The two checkpoints the code needs are not in this repository (`.gitignore` keeps
+`*.model` and `*.pth` out of it). Fetch them once:
+
+```bash
+./get_weights.sh
+```
+
+Sizes, checksums, where the files are published, and how to point the script at a mirror
+of your own are in [WEIGHTS.md](WEIGHTS.md).
+
+
 ### Quick Start
 
 To generate masked videos of the speaker at certain second with only one scene:
