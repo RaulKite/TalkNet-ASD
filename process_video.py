@@ -321,7 +321,9 @@ def process_one_video(video_path: str, output_dir: str = "./output", frame_num: 
         model = YOLO("yolo11n.pt")
         # show=True calls cv2.imshow, which aborts the whole process on a headless
         # box (no Qt xcb platform). save=True keeps the annotated output video.
-        results = model.track(source=video_path, conf=0.5, iou=0.5, show=False, save=True, save_dir="output", save_txt=True, save_json=True)
+        # save_dir per clip: con `save_dir="output"` ultralytics escribia el .avi y
+        # `labels/` en la raiz de `output/`, que es compartida entre lotes.
+        results = model.track(source=video_path, conf=0.5, iou=0.5, show=False, save=True, save_dir=f"./output/{case_id}", save_txt=True, save_json=True)
         track_id = get_track_id_at_point(frame_num, center_x, center_y, results)
         output_path = f"./output/{case_id}/{case_id}.mp4"
         
@@ -353,26 +355,26 @@ def process_folder(input_dir: str, output_dir: str = "./salida", frame_num: int 
     # Get all video files
     video_files = [f for f in os.listdir(input_dir) 
                    if f.lower().endswith(('.mp4', '.avi', '.mov'))]
+    procesados = []
     
     for video_file in video_files:
         video_path = os.path.join(input_dir, video_file)
         print(50*'-')
         print(f"Processing: {video_file}")
         print(50*'-')
+        case_id = os.path.basename(video_file).split('.mp4')[0]
+        procesados.append(case_id)
         try:
             process_one_video(video_path, output_dir=output_dir, frame_num=frame_num)
         except Exception as e:
             print(f"Error processing {video_file}: {str(e)}")
             continue
-      # Delete temporal folder
-    print(50*"**")
-    print(f"Deleting temporal folder: ./output")
-    os.system(f"rm -rf ./output")
-    # Delete runs folder if it exists
-    if os.path.exists("runs"):
-        os.system("rm -rf runs")
-        print("Deleted runs folder")
-    print(50*"**")
+        finally:
+            # El trabajo intermedio de ESTE clip ya no hace falta (el video enmascarado
+            # esta en --output_dir). Se borra clip a clip: ni acumula GB en un lote de
+            # cientos de clips, ni toca `output/` de otra tanda que comparta el checkout.
+            shutil.rmtree(os.path.join("./output", case_id), ignore_errors=True)
+    print(f"Deleted per-clip work dirs: {len(procesados)}")
         
 
 if __name__ == "__main__":
