@@ -22,8 +22,10 @@ if [ ! -d "$SAVE_TO" ]; then
 fi
 
 # One temp dir per clip: the shared /tmp/talknet_processing made two concurrent
-# runs overwrite each other's frames.
+# runs overwrite each other's frames. A killed run can leave frames behind, so the
+# dir is recreated instead of reused: stale frames would mix with the new clip.
 TEMP_DIR="${TMPDIR:-/tmp}/talknet_processing/$CASE_ID"
+rm -rf "$TEMP_DIR"
 mkdir -p $TEMP_DIR/{pyavi,pyframes,pywork}
 
 # Define paths and parameters
